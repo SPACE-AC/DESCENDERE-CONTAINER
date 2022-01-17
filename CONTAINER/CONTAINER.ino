@@ -82,7 +82,7 @@ void setup() {
     digitalWrite(buzzer,LOW);
     delay(50);
     }}
-  Serial.println("[Install SD Card done")
+  Serial.println("[Install SD Card done") //fix later
   recovery();
 }
 
