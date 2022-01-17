@@ -2,15 +2,15 @@
 #include <SPI.h>
 #include <EEPROM.h>
 #include <Seeed_BME280.h>
-#include <TinyGPS++.h>
+#include <TinyGPSPlus.h>
 #include <TimeLib.h>
 #include <Servo.h>
 
 //set port
-#define voldivpin //set port
-#define LED1 //set port
-#define LED2 //set port
-#define buzzer //set port
+#define voldivpin 21//set port
+#define LED1 4//set port
+#define LED2 5//set port
+#define buzzer 3//set port
 
 TinyGPSPlus gps;
 BME280 bme280;
@@ -62,11 +62,12 @@ int StatePayload = 0;
 String cmdEcho = "----"; //IDK what is this doing but know why its here
 
 void setup() {
+  
   Serial3.begin(9600);
   Serial4.begin(9600);
 
-  servo1.attach(?); //set port
-  servo2.attach(?); //set port
+  servo1.attach(22); //set port
+  servo2.attach(23); //set port
   pinMode(LED1, OUTPUT);
   pinMode(LED2, OUTPUT);
   pinMode(buzzer,OUTPUT);
@@ -82,7 +83,7 @@ void setup() {
     digitalWrite(buzzer,LOW);
     delay(50);
     }}
-  Serial.println("[Install SD Card done") //fix later
+  Serial.println("[Install SD Card done"); //fix later
   recovery();
 }
 
@@ -150,12 +151,12 @@ void Command(String cm){
   }
   else if (cm == "PayloadX,ON"){
     Serial5.print("CMD,1022,PayloadX,ON\r");
-    S1r='R';
+    P1r='R';
     cmdEcho = "PayloadON";
   }
   else if (cm == "PayloadX,OFF"){
     Serial5.print("CMD,1022,PayloadX,OFF\r");
-    S1r='N';
+    P1r='N';
     cmdEcho = "PayloadOFF";
   }
   else if (cm == "SIM,ENABLE"){
@@ -289,7 +290,7 @@ void inMission(){
         State = "EJECTED SECOND PARACHUTE";
         if (Altitude <= 410 && Altitude > 390){
           state = 4;
-          P2r = 'R';
+          P1r = 'R';
           Serial3.print("CMD,1022,SECOND PARACHUTE,ON\r");
           servo2.write(180);
           //delay(1000);
@@ -315,7 +316,7 @@ void inMission(){
        + String(Altitude,2) + "," + String(Temp,2) + ","
        + String(Voltage) + "," + String(gpsTime) + "," 
        + String(Latitude,6) + "," + String(Longitude,6) + "," + String(gpsAltitude) + ","
-       + String(gpsSatellite) + "," + State + "," + String(StatePayload) + "," + String(P2r)
+       + String(gpsSatellite) + "," + State + "," + String(StatePayload) + "," + String(P1r)
        + cmdEcho + "\r";
     File file = SD.open(FileC, FILE_WRITE);
     if (file){
@@ -335,30 +336,30 @@ void emergency(){
   if (Serial3.available()) {  //input xbee
     while (Serial3.available ()) {
       char emergency = Serial3.read();
-      switch(char){
+      switch(emergency){
        case 0:
-        if emergency = "CMD,1022,FORCE,PARADEPLOY"; {
+        if (emergency == "CMD,1022,FORCE,PARADEPLOY") {
         servo1.write(90);
         //delay(1000);
         servo1.write(0);
         }break;
        case 1:
-        if emergency = "CMD,1022,FORCE,TIMEDPL"; {
+        if (emergency == "CMD,1022,FORCE,TIMEDPL") {
         servo2.write(90);
         //delay(1000);
         servo2.write(0);
         }break;
        case 2:
-        if emergency = "CMD,1022,FORCE,BEGINPL"; {
+        if (emergency == "CMD,1022,FORCE,BEGINPL") {
         servo1.write(90);
         delay(1000);
         }break;
        case 3:
-        if emergency = "CMD,1022,FORCE,STOPPL"; {
+        if (emergency == "CMD,1022,FORCE,STOPPL") {
         servo1.write(0);
         }break;
        case 4:
-        if emergency = "CMD,1022,FORCE,RESETCAMPOS"; {
+        if (emergency == "CMD,1022,FORCE,RESETCAMPOS") {
         servo1.write(90);
         servo2.write(90);
         }break;
@@ -387,18 +388,18 @@ void loop() {
     while (Serial4.available()){
       char inchar=Serial4.read();
       if (inchar=='$' or inchar=='\r'){
-        S1=S1.trim();   
-        Serial4.println(S1+"$");
-        Serial4.println("S1 : "+S1);
+        P1=P1.trim();   
+        Serial4.println(P1+"$");
+        Serial4.println("S1 : "+P1);
         StatePayload++;
-        File file = SD.open(FileS1, FILE_WRITE);
+        File file = SD.open(FILE_WRITE);
         if (file){
-          file.println(S1);
+          file.println(P1);
           file.close();
         }
-        S1 = "";
+        P1 = "";
       }
       else{
-      S1+=inchar;
+      P1+=inchar;
     }}}
 }
