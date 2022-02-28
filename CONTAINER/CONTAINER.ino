@@ -385,7 +385,7 @@ void loop() {
   } 
   if (poll_time1 - poll_time0 >= 250) {
     poll_time0 = poll_time1;
-    Serial4.print(1022,CMD,PL,POLL);
+    Serial4.print("1022,CMD,PL,POLL");
   }
   if (Serial3.available()) {
     for (int i = 0; i < 1; i++) { //debug only
