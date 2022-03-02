@@ -12,8 +12,8 @@
 #define LED2 5        // set port
 #define buzzer 3      // set port
 
-#define R1_Ohm 1000
-#define R2_Ohm 1250
+#define R1_Ohm 2000
+#define R2_Ohm 1200
 
 TinyGPSPlus gps;
 BME280 bme280;
@@ -34,7 +34,7 @@ bool SIM = false;
 int first = 0;
 
 char FileC[100];
-char FileP[100];
+char FileP[100];  // FileS1
 
 const int recovPkg = 0;
 const int recovState = 10;
@@ -48,7 +48,7 @@ int simPressure = 0;
 
 String telemetry = "";
 String tp = "";
-String cmd = ""; 
+String cmd = "";  // IDK WHAT THIS IS
 
 String teamId = "1022";
 char missionTime[32] = "xx:xx:xx";
@@ -65,13 +65,14 @@ float gpsAltitude = 0;
 int gpsSatellite = 0;
 String State = "PRELAUNCH";
 int StatePayload = 0;
-String cmdEcho = "N/A"; 
+String cmdEcho = "N/A";  // IDK what is this doing but know why its here
 
 void recovery();
 void get_file();
 time_t getTeensy3Time();
 
 void setup() {
+    Serial.println("Initiating ...");
     Serial3.begin(9600);  // GCS
     Serial4.begin(9600);  // Payload
 
@@ -83,9 +84,13 @@ void setup() {
     pinMode(voldivpin, INPUT);
 
     setSyncProvider(getTeensy3Time);
+
+    Serial.println("Initializing BME280 ...");
     bme280.init();
 
+    Serial.println("Initializing SD ...");
     if (!SD.begin(10)) {
+        Serial.println("SD card failed to initialize");
         for (int i = 0; i < 5; i++) {
             digitalWrite(buzzer, HIGH);
             delay(50);
@@ -93,7 +98,7 @@ void setup() {
             delay(50);
         }
     }
-    Serial.println("Install SD Card done");
+    Serial.println("Install SD Card done");  // fix later
     recovery();
 }
 
