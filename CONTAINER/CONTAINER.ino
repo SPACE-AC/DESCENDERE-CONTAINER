@@ -34,7 +34,7 @@ bool SIM = false;
 int first = 0;
 
 char FileC[100];
-char FileP[100];  // FileS1
+char FileP[100];
 
 const int recovPkg = 0;
 const int recovState = 10;
@@ -48,7 +48,7 @@ int simPressure = 0;
 
 String telemetry = "";
 String tp = "";
-String cmd = "";  // IDK WHAT THIS IS
+String cmd = ""; 
 
 String teamId = "1022";
 char missionTime[32] = "xx:xx:xx";
@@ -65,7 +65,7 @@ float gpsAltitude = 0;
 int gpsSatellite = 0;
 String State = "PRELAUNCH";
 int StatePayload = 0;
-String cmdEcho = "N/A";  // IDK what is this doing but know why its here
+String cmdEcho = "N/A"; 
 
 void recovery();
 void get_file();
@@ -93,7 +93,7 @@ void setup() {
             delay(50);
         }
     }
-    Serial.println("[Install SD Card done");  // fix later
+    Serial.println("Install SD Card done");
     recovery();
 }
 
