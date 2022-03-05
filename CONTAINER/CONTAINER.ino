@@ -72,9 +72,10 @@ void get_file();
 time_t getTeensy3Time();
 
 void setup() {
+    Serial.begin(9600);
     Serial.println("Initiating ...");
-    Serial3.begin(9600);  // GCS
-    Serial4.begin(9600);  // Payload
+    Serial3.begin(115200);  // GCS
+    Serial4.begin(115200);  // Payload
 
     servo1.attach(22);  // set port
     servo2.attach(23);  // set port
@@ -168,18 +169,8 @@ void doCommand(String cmd) {
         }
         servo1.write(90);
         servo2.write(90);
-        Serial.println("PayloadOFF");
-        Serial5.print("CMD,1022,PayloadX,OFF\r");
-        P = 'R';
-        cmdEcho = "PayloadON";
-    } else if (cmd == "PayloadX,ON") {
-        Serial5.print("CMD,1022,PayloadX,ON\r");
-        P = 'R';
-        cmdEcho = "PayloadON";
-    } else if (cmd == "PayloadX,OFF") {
-        Serial5.print("CMD,1022,PayloadX,OFF\r");
-        P = 'N';
-        cmdEcho = "PayloadOFF";
+        Serial.println("CXOFF");
+        state = 0;
     } else if (cmd == "SIM,ENABLE") {
         simEN = true;
         cmdEcho = "SIMEN";
@@ -210,6 +201,7 @@ void doCommand(String cmd) {
             first = 1;
         }
     } else {
+        emergency(cmd);
         Serial.println(cmd);
     }
 }
@@ -297,23 +289,23 @@ void inMission() {
                 }
                 break;
             case 2:
-                State = "EJECTED Payload";
-                if (Altitude <= 310 && Altitude > 290) {
+                State = "Parachute Deployed";
+                if (Altitude <= 410 && Altitude > 390) {
                     state = 3;
                     P = 'R';
-                    Serial5.print("CMD,1022,PAYLOAD,ON\r");
-                    servo1.write(90);
+                    Serial3.print("CMD,1022,SECOND PARACHUTE,ON\r");
+                    servo2.write(180);
                     // delay(1000);
                     // servo2.write(0);
                 }
                 break;
             case 3:
-                State = "EJECTED SECOND PARACHUTE";
-                if (Altitude <= 410 && Altitude > 390) {
+                State = "Payload Deployment Initiated";
+                if (Altitude <= 310 && Altitude > 290) {
                     state = 4;
                     P = 'R';
-                    Serial3.print("CMD,1022,SECOND PARACHUTE,ON\r");
-                    servo2.write(180);
+                    Serial5.print("CMD,1022,PAYLOAD,ON\r");
+                    servo1.write(90);
                     // delay(1000);
                     // servo2.write(0);
                 }
@@ -341,8 +333,8 @@ void inMission() {
             file.println(telemetry);
             file.close();
         }
+        Serial.println(telemetry);
         Serial3.print(telemetry);
-        Serial4.print(telemetry);
         EEPROM.put(recovPkg, Packet);
         EEPROM.put(recovState, state);
         Packet++;
@@ -351,37 +343,52 @@ void inMission() {
 }
 
 void emergency(String cmd) {
-    if (Serial3.available()) {  // input xbee
-        while (Serial3.available()) {
-            if (cmd == "FORCE,PARADEPLOY") {
-                servo1.write(90);
-                // delay(1000);
-                servo1.write(0);
-            } else if (cmd == "FORCE,TIMEDPL") {
-                servo2.write(90);
-                // delay(1000);
-                servo2.write(0);
-            } else if (cmd == "FORCE,BEGINPL") {
-                servo1.write(90);
-                delay(1000);
-            } else if (cmd == "FORCE,STOPPL") {
-                servo1.write(0);
-            } else if (cmd == "FORCE,RESETCAMPOS") {
-                servo1.write(90);
-                servo2.write(90);
-            }
-        }
+    if (cmd == "FORCE,PARADEPLOY") {
+        servo1.write(90);
+        // delay(1000);
+        servo1.write(0);
+    } else if (cmd == "FORCE,TIMEDPL") {
+        servo2.write(90);
+        // delay(1000);
+        servo2.write(0);
+    } else if (cmd == "FORCE,BEGINPL") {
+        state = 3;
+        servo1.write(90);
+        delay(1000);
+    } else if (cmd == "FORCE,STOPPL") {
+        servo1.write(0);
+    } else if (cmd == "FORCE,RESETCAMPOS") {
+        servo1.write(90);
+        servo2.write(90);
     }
 }
 
 void loop() {
-    if (cxON) {
-        inMission();
-    }
     poll_time1 = millis();
     if (state >= 3 && poll_time1 - poll_time0 >= 250) {
         poll_time0 = poll_time1;
+        Serial.println("Pinging payload");
         Serial4.print("CMD,1022,TP,POLL\r");
+    }
+    if (Serial.available()) {
+        for (int i = 0; i < 1; i++) {  // debug only
+            digitalWrite(buzzer, HIGH);
+            delay(50);
+            digitalWrite(buzzer, LOW);
+            delay(50);
+        }
+        while (Serial.available()) {
+            char inchar = Serial.read();
+            if (inchar == '$' or inchar == '\r') {
+                cmd = cmd.trim();
+                cmd = (cmd.substring(9));
+                Serial.println("GS:" + cmd);
+                doCommand(cmd);
+                cmd = "";
+            } else {
+                cmd += inchar;
+            }
+        }
     }
     if (Serial3.available()) {
         for (int i = 0; i < 1; i++) {  // debug only
@@ -395,7 +402,7 @@ void loop() {
             if (inchar == '$' or inchar == '\r') {
                 cmd = cmd.trim();
                 cmd = (cmd.substring(9));
-                Serial.println("S3:" + cmd);
+                Serial.println("GS:" + cmd);
                 doCommand(cmd);
                 cmd = "";
             } else {
@@ -408,8 +415,8 @@ void loop() {
             char inchar = Serial4.read();
             if (inchar == '$' or inchar == '\r') {
                 tp = tp.trim();
-                Serial4.println(tp + "$");
-                Serial4.println("TP : " + tp);
+                Serial3.print(tp + "\r");
+                Serial.println("TP: " + tp);
                 StatePayload++;
                 File file = SD.open(FileC, FILE_WRITE);
                 if (file) {
@@ -421,5 +428,9 @@ void loop() {
                 tp += inchar;
             }
         }
+    }
+    delay(10);
+    if (cxON) {
+        inMission();
     }
 }
