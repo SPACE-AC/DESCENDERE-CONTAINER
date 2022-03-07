@@ -84,6 +84,9 @@ void setup() {
     pinMode(buzzer, OUTPUT);
     pinMode(voldivpin, INPUT);
 
+    pinMode(13, OUTPUT);
+    digitalWrite(13, HIGH);
+
     setSyncProvider(getTeensy3Time);
 
     Serial.println("Initializing BME280 ...");
@@ -260,13 +263,15 @@ void get_time() {
 
 void get_battery() {
     //  Voltage = (((analogRead(voldivpin) * 0.00080566406)*(4000))/1000)+0.16;
-    float detected_voltage = (map(analogRead(voldivpin), 0, 1023, 0, 3.3));
+    // float detected_voltage = (map(analogRead(voldivpin), 0, 1023, 0, 3.3));
+    float detected_voltage = (analogRead(voldivpin) * 0.00080566406);
     Voltage = detected_voltage * ((R1_Ohm + R2_Ohm) / R2_Ohm);
 }
 
 void inMission() {
     time1 = millis();
     if (time1 - time0 >= 990) {
+        Serial.println("inMission");
         get_time();
         get_gps();
         get_battery();
@@ -364,11 +369,11 @@ void emergency(String cmd) {
 }
 
 void loop() {
-    poll_time1 = millis();
+    poll_time1 = millis() + 125;
     if (state >= 3 && poll_time1 - poll_time0 >= 250) {
         poll_time0 = poll_time1;
         Serial.println("Pinging payload");
-        Serial4.print("CMD,1022,TP,POLL\r");
+        Serial4.print("CMD,1022,TP,POLL\r\r\r");
     }
     if (Serial.available()) {
         for (int i = 0; i < 1; i++) {  // debug only
@@ -397,37 +402,27 @@ void loop() {
             digitalWrite(buzzer, LOW);
             delay(50);
         }
-        while (Serial3.available()) {
-            char inchar = Serial3.read();
-            if (inchar == '$' or inchar == '\r') {
-                cmd = cmd.trim();
-                cmd = (cmd.substring(9));
-                Serial.println("GS:" + cmd);
-                doCommand(cmd);
-                cmd = "";
-            } else {
-                cmd += inchar;
-            }
-        }
+        String cmd = Serial3.readStringUntil('\r');
+        if (cmd == "\r") return;
+        cmd = cmd.trim();
+        cmd = (cmd.substring(9));
+        Serial.println("GS:" + cmd);
+        doCommand(cmd);
+        cmd = "";
     }
     if (Serial4.available()) {
-        while (Serial4.available()) {
-            char inchar = Serial4.read();
-            if (inchar == '$' or inchar == '\r') {
-                tp = tp.trim();
-                Serial3.print(tp + "\r");
-                Serial.println("TP: " + tp);
-                StatePayload++;
-                File file = SD.open(FileC, FILE_WRITE);
-                if (file) {
-                    file.println(tp);
-                    file.close();
-                }
-                tp = "";
-            } else {
-                tp += inchar;
-            }
+        String tp = Serial4.readStringUntil('\r');
+        if (tp == "\r") return;
+        tp = tp.trim();
+        Serial3.print(tp + "\r");
+        Serial.println("TP: " + tp);
+        StatePayload++;
+        File file = SD.open(FileC, FILE_WRITE);
+        if (file) {
+            file.println(tp);
+            file.close();
         }
+        tp = "";
     }
     delay(10);
     if (cxON) {
