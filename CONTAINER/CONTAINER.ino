@@ -12,8 +12,8 @@
 #define LED2 5        // set port
 #define buzzer 3      // set port
 
-#define R1_Ohm 2000
-#define R2_Ohm 1200
+#define R1_Ohm 2000.0
+#define R2_Ohm 1200.0
 
 TinyGPSPlus gps;
 BME280 bme280;
@@ -59,8 +59,8 @@ float Altitude = 0;
 float Temp = 0;
 float Voltage = 0;
 char gpsTime[32] = "xx:xx:xx";
-float Latitude = 0;
-float Longitude = 0;
+double Latitude = 0;
+double Longitude = 0;
 float gpsAltitude = 0;
 int gpsSatellite = 0;
 String State = "PRELAUNCH";
@@ -74,6 +74,7 @@ time_t getTeensy3Time();
 void setup() {
     Serial.begin(9600);
     Serial.println("Initiating ...");
+    Serial2.begin(9600);
     Serial3.begin(115200);  // GCS
     Serial4.begin(115200);  // Payload
 
@@ -229,11 +230,13 @@ time_t getTeensy3Time() {
 }
 
 void get_gps() {
-    gps.encode(Serial2.read());
-    if (gps.location.isValid()) {
-        Latitude = gps.location.lat();
-        Longitude = gps.location.lng();
-    }
+    // while (Serial2.available()) {
+    //     gps.encode(Serial2.read());
+    // }
+    // if (gps.location.isValid()) {
+    Latitude = gps.location.lat();
+    Longitude = gps.location.lng();
+    // }
     sprintf(gpsTime, "%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
     gpsAltitude = gps.altitude.meters();
     gpsSatellite = gps.satellites.value();
@@ -264,14 +267,13 @@ void get_time() {
 void get_battery() {
     //  Voltage = (((analogRead(voldivpin) * 0.00080566406)*(4000))/1000)+0.16;
     // float detected_voltage = (map(analogRead(voldivpin), 0, 1023, 0, 3.3));
-    float detected_voltage = (analogRead(voldivpin) * 0.00080566406);
-    Voltage = detected_voltage * ((R1_Ohm + R2_Ohm) / R2_Ohm);
+    float apparentVoltage = analogRead(voldivpin) * 3.3 / 1023.0;
+    Voltage = apparentVoltage * ((R1_Ohm + R2_Ohm) / R2_Ohm);
 }
 
 void inMission() {
     time1 = millis();
     if (time1 - time0 >= 990) {
-        Serial.println("inMission");
         get_time();
         get_gps();
         get_battery();
@@ -370,6 +372,8 @@ void emergency(String cmd) {
 
 void loop() {
     poll_time1 = millis() + 125;
+    while (Serial2.available())
+        gps.encode(Serial2.read());
     if (state >= 3 && poll_time1 - poll_time0 >= 250) {
         poll_time0 = poll_time1;
         Serial.println("Pinging payload");
@@ -402,13 +406,15 @@ void loop() {
             digitalWrite(buzzer, LOW);
             delay(50);
         }
-        String cmd = Serial3.readStringUntil('\r');
-        if (cmd == "\r") return;
-        cmd = cmd.trim();
-        cmd = (cmd.substring(9));
-        Serial.println("GS:" + cmd);
-        doCommand(cmd);
-        cmd = "";
+        while (Serial3.available()) {
+            String cmd = Serial3.readStringUntil('\r');
+            if (cmd == "\r") return;
+            cmd = cmd.trim();
+            cmd = (cmd.substring(9));
+            Serial.println("GS:" + cmd);
+            doCommand(cmd);
+            cmd = "";
+        }
     }
     if (Serial4.available()) {
         String tp = Serial4.readStringUntil('\r');
