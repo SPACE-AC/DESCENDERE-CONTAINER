@@ -6,20 +6,29 @@
 #include <TimeLib.h>
 #include <TinyGPSPlus.h>
 
-// set port
-#define voldivpin 21  // set port
-#define LED1 4        // set port
-#define LED2 5        // set port
-#define buzzer 3      // set port
+// CONFIG - START
 
-#define R1_Ohm 2000.0
-#define R2_Ohm 1200.0
+#define voldivpin 21
+#define LED1_PIN 4
+#define LED2_PIN 5
+#define BUZZER_PIN 3
+
+#define SERVO_PARA_PIN 22
+#define SERVO_BREAK_PIN 23
+
+#define R1_OHM 2000.0F
+#define R2_OHM 1200.0F
+
+#define xbeeGS Serial3
+#define xbeeTP Serial4
+
+// CONFIG - END
 
 TinyGPSPlus gps;
 BME280 bme280;
 time_t RTCTime;
-Servo servo1;
-Servo servo2;
+Servo servoParachute;
+Servo servoBreak;
 
 unsigned long time1 = 0;
 unsigned long time0 = 0;
@@ -48,7 +57,7 @@ int simPressure = 0;
 
 String telemetry = "";
 String tp = "";
-String cmd = "";  // IDK WHAT THIS IS
+String cmd = "";
 
 String teamId = "1022";
 char missionTime[32] = "xx:xx:xx";
@@ -65,46 +74,59 @@ float gpsAltitude = 0;
 int gpsSatellite = 0;
 String State = "PRELAUNCH";
 int StatePayload = 0;
-String cmdEcho = "N/A";  // IDK what is this doing but know why its here
+String cmdEcho = "N/A";
 
 void recovery();
 void get_file();
 time_t getTeensy3Time();
 
+void beep(const unsigned int& count, const unsigned int& delay_ms = 100) {
+    for (unsigned int i = 0; i < count; i++) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(delay_ms);
+        digitalWrite(BUZZER_PIN, LOW);
+        delay(delay_ms);
+    }
+}
+
 void setup() {
     Serial.begin(9600);
     Serial.println("Initiating ...");
     Serial2.begin(9600);
-    Serial3.begin(115200);  // GCS
-    Serial4.begin(115200);  // Payload
+    xbeeGS.begin(115200);  // GCS
+    xbeeTP.begin(115200);  // Payload
 
-    servo1.attach(22);  // set port
-    servo2.attach(23);  // set port
-    pinMode(LED1, OUTPUT);
-    pinMode(LED2, OUTPUT);
-    pinMode(buzzer, OUTPUT);
+    servoParachute.attach(SERVO_PARA_PIN);  // set port
+    servoBreak.attach(SERVO_BREAK_PIN);     // set port
+    pinMode(LED1_PIN, OUTPUT);
+    pinMode(LED2_PIN, OUTPUT);
+    pinMode(BUZZER_PIN, OUTPUT);
     pinMode(voldivpin, INPUT);
-
     pinMode(13, OUTPUT);
     digitalWrite(13, HIGH);
 
+    digitalWrite(BUZZER_PIN, HIGH);
+    delay(1000);
+    digitalWrite(BUZZER_PIN, LOW);
+
     setSyncProvider(getTeensy3Time);
 
-    Serial.println("Initializing BME280 ...");
-    bme280.init();
+    if (bme280.init())
+        Serial.println("✔ SUCCEED: BME280");
+    else
+        Serial.println("[FAILED] Unable to set up BME280!");
 
-    Serial.println("Initializing SD ...");
-    if (!SD.begin(10)) {
-        Serial.println("SD card failed to initialize");
-        for (int i = 0; i < 5; i++) {
-            digitalWrite(buzzer, HIGH);
-            delay(50);
-            digitalWrite(buzzer, LOW);
-            delay(50);
-        }
+    if (SD.begin(10))
+        Serial.println("✔ SUCCEED: SD card reader");
+    else {
+        Serial.println("[FAILED] SD card reader initialization failed!");
+        beep(5);
     }
-    Serial.println("Install SD Card done");  // fix later
+    // Serial.println("Install SD Card done");  // fix later
     recovery();
+
+    // ! TESTING ONLY
+    // state = 3;
 }
 
 void recovery() {
@@ -145,12 +167,7 @@ void recovery() {
 
 void doCommand(String cmd) {
     if (cmd == "CX,ON") {
-        for (int i = 0; i < 2; i++) {  // omsin
-            digitalWrite(buzzer, HIGH);
-            delay(50);
-            digitalWrite(buzzer, LOW);
-            delay(50);
-        }
+        beep(2);
         Serial.println("CXON");
         cxON = true;
         refAltitude = round(float(bme280.calcAltitude(bme280.getPressure())));
@@ -171,8 +188,8 @@ void doCommand(String cmd) {
         for (int i = 0; i < EEPROM.length(); i++) {
             EEPROM.write(i, 0);
         }
-        servo1.write(90);
-        servo2.write(90);
+        servoParachute.write(90);
+        servoBreak.write(90);
         Serial.println("CXOFF");
         state = 0;
     } else if (cmd == "SIM,ENABLE") {
@@ -230,13 +247,8 @@ time_t getTeensy3Time() {
 }
 
 void get_gps() {
-    // while (Serial2.available()) {
-    //     gps.encode(Serial2.read());
-    // }
-    // if (gps.location.isValid()) {
     Latitude = gps.location.lat();
     Longitude = gps.location.lng();
-    // }
     sprintf(gpsTime, "%02d:%02d:%02d", gps.time.hour(), gps.time.minute(), gps.time.second());
     gpsAltitude = gps.altitude.meters();
     gpsSatellite = gps.satellites.value();
@@ -268,12 +280,13 @@ void get_battery() {
     //  Voltage = (((analogRead(voldivpin) * 0.00080566406)*(4000))/1000)+0.16;
     // float detected_voltage = (map(analogRead(voldivpin), 0, 1023, 0, 3.3));
     float apparentVoltage = analogRead(voldivpin) * 3.3 / 1023.0;
-    Voltage = apparentVoltage * ((R1_Ohm + R2_Ohm) / R2_Ohm);
+    Voltage = apparentVoltage * ((R1_OHM + R2_OHM) / R2_OHM);
 }
 
 void inMission() {
     time1 = millis();
     if (time1 - time0 >= 990) {
+        //        Serial.println("inMission");
         get_time();
         get_gps();
         get_battery();
@@ -296,30 +309,32 @@ void inMission() {
                 }
                 break;
             case 2:
-                State = "Parachute Deployed";
+                State = "PARADEPLOY";
                 if (Altitude <= 410 && Altitude > 390) {
                     state = 3;
                     P = 'R';
-                    Serial3.print("CMD,1022,SECOND PARACHUTE,ON\r");
-                    servo2.write(180);
-                    // delay(1000);
-                    // servo2.write(0);
+                    xbeeGS.print("CMD,1022,SECOND PARACHUTE,ON\r");
+
+                    // rotate 90 degrees on continuous servo using delay
+                    servoParachute.write(26);
+                    delay(173);
+                    servoParachute.write(90);
                 }
                 break;
             case 3:
-                State = "Payload Deployment Initiated";
+                State = "TPDEPLOY";
                 if (Altitude <= 310 && Altitude > 290) {
                     state = 4;
                     P = 'R';
                     Serial5.print("CMD,1022,PAYLOAD,ON\r");
-                    servo1.write(90);
+                    servoParachute.write(90);
                     // delay(1000);
                     // servo2.write(0);
                 }
                 break;
             case 4:
                 State = "RELEASED";
-                servo2.write(180);
+                servoBreak.write(180);
                 if (Altitude <= 5 && Altitude >= -5) {
                     state = 5;
                     State = "LAND";
@@ -327,9 +342,9 @@ void inMission() {
                 break;
             case 5:
                 while (true) {
-                    digitalWrite(buzzer, HIGH);
+                    digitalWrite(BUZZER_PIN, HIGH);
                     delay(500);
-                    digitalWrite(buzzer, LOW);
+                    digitalWrite(BUZZER_PIN, LOW);
                     delay(500);
                 }
                 break;
@@ -341,7 +356,7 @@ void inMission() {
             file.close();
         }
         Serial.println(telemetry);
-        Serial3.print(telemetry);
+        xbeeGS.print(telemetry);
         EEPROM.put(recovPkg, Packet);
         EEPROM.put(recovState, state);
         Packet++;
@@ -351,44 +366,69 @@ void inMission() {
 
 void emergency(String cmd) {
     if (cmd == "FORCE,PARADEPLOY") {
-        servo1.write(90);
+        servoParachute.write(90);
         // delay(1000);
-        servo1.write(0);
-    } else if (cmd == "FORCE,TIMEDPL") {
-        servo2.write(90);
-        // delay(1000);
-        servo2.write(0);
-    } else if (cmd == "FORCE,BEGINPL") {
-        state = 3;
-        servo1.write(90);
+        servoParachute.write(0);
+    } else if (cmd == "FORCE,SEQUENCE") {
+        // Waiting for Toon's break system code
+        servoParachute.write(90);
         delay(1000);
-    } else if (cmd == "FORCE,STOPPL") {
-        servo1.write(0);
-    } else if (cmd == "FORCE,RESETCAMPOS") {
-        servo1.write(90);
-        servo2.write(90);
-    }
+    } else if (cmd == "FORCE,RELEASE") {
+        servoBreak.write(0);
+    } else if (cmd == "FORCE,BREAK") {
+        servoBreak.write(180);
+    } else if (cmd == "FORCE,RESETCAM") {
+        xbeeTP.print("CMD,1022,FORCE,RESETCAM\r");
+    } else if (cmd == "FORCE,CALCAM") {
+        xbeeTP.print("CMD,1022,FORCE,CALCAM\r");
+    } else if (cmd == "FORCE,POLL") {
+        Serial.println("Pinging payload");
+        xbeeTP.print("CMD,1022,TP,POLL\r\r\r");
+    } else if (cmd == "FORCE,STATE1")
+        state = 1;
+    else if (cmd == "FORCE,STATE2")
+        state = 2;
+    else if (cmd == "FORCE,STATE3")
+        state = 3;
+    else if (cmd == "FORCE,STATE4")
+        state = 4;
+    else if (cmd == "FORCE,STATE5")
+        state = 5;
 }
 
 void loop() {
+    // if (xbeeTP.available()) {
+    //     Serial.print(xbeeTP.readString(5));
+    // }
+    if (xbeeTP.available()) {
+        while (xbeeTP.available()) {
+            char inchar = xbeeTP.read();
+            tp += inchar;
+            if (inchar == '\r' || inchar == '\n') {
+                xbeeGS.print(tp);
+                Serial.println(tp);
+                tp = "";
+            }
+        }
+    }
     poll_time1 = millis() + 125;
     while (Serial2.available())
         gps.encode(Serial2.read());
     if (state >= 3 && poll_time1 - poll_time0 >= 250) {
         poll_time0 = poll_time1;
         Serial.println("Pinging payload");
-        Serial4.print("CMD,1022,TP,POLL\r\r\r");
+        xbeeTP.print("CMD,1022,TP,POLL\r\r\r");
     }
     if (Serial.available()) {
         for (int i = 0; i < 1; i++) {  // debug only
-            digitalWrite(buzzer, HIGH);
+            digitalWrite(BUZZER_PIN, HIGH);
             delay(50);
-            digitalWrite(buzzer, LOW);
+            digitalWrite(BUZZER_PIN, LOW);
             delay(50);
         }
         while (Serial.available()) {
             char inchar = Serial.read();
-            if (inchar == '$' or inchar == '\r') {
+            if (inchar == '$' || inchar == '\r' || inchar == '\n') {
                 cmd = cmd.trim();
                 cmd = (cmd.substring(9));
                 Serial.println("GS:" + cmd);
@@ -399,15 +439,15 @@ void loop() {
             }
         }
     }
-    if (Serial3.available()) {
+    if (xbeeGS.available()) {
         for (int i = 0; i < 1; i++) {  // debug only
-            digitalWrite(buzzer, HIGH);
+            digitalWrite(BUZZER_PIN, HIGH);
             delay(50);
-            digitalWrite(buzzer, LOW);
+            digitalWrite(BUZZER_PIN, LOW);
             delay(50);
         }
-        while (Serial3.available()) {
-            String cmd = Serial3.readStringUntil('\r');
+        while (xbeeGS.available()) {
+            String cmd = xbeeGS.readStringUntil('\r');
             if (cmd == "\r") return;
             cmd = cmd.trim();
             cmd = (cmd.substring(9));
@@ -416,20 +456,28 @@ void loop() {
             cmd = "";
         }
     }
-    if (Serial4.available()) {
-        String tp = Serial4.readStringUntil('\r');
-        if (tp == "\r") return;
-        tp = tp.trim();
-        Serial3.print(tp + "\r");
-        Serial.println("TP: " + tp);
-        StatePayload++;
-        File file = SD.open(FileC, FILE_WRITE);
-        if (file) {
-            file.println(tp);
-            file.close();
-        }
-        tp = "";
-    }
+    // if (xbeeTP.available()) {
+    // String tp = xbeeTP.readStringUntil('\r');
+    // if (tp == "\r") return;
+    // tp = tp.trim();
+    // Serial.println("gonna read");
+
+    // char tpByte[10];
+    // const unsigned short n_read = xbeeTP.readBytes(tpByte, 10);
+    // // Serial.println("read");
+    // for (unsigned short i = 0; i < n_read; i++) {
+    //     Serial.print(tpByte[i]);
+    //     xbeeGS.print(tpByte[i]);
+    // }
+    // // Serial.println("TP: " + tp);
+    // // StatePayload++;
+    // File file = SD.open(FileC, FILE_WRITE);
+    // if (file) {
+    //     file.println(tp);
+    //     file.close();
+    // }
+    // tp = "";
+    // }
     delay(10);
     if (cxON) {
         inMission();
