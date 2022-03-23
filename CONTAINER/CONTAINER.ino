@@ -8,16 +8,18 @@
 
 // CONFIG - START
 
-#define voldivpin 21
 #define LED1_PIN 4
 #define LED2_PIN 5
 #define BUZZER_PIN 3
 
-#define SERVO_PARA_PIN 22
-#define SERVO_BREAK_PIN 23
+#define SERVO_PARA_PIN 4
+#define SERVO_BREAK_PIN 5
 
-#define R1_OHM 2000.0F
-#define R2_OHM 1200.0F
+#define SD_CS_PIN 10
+
+#define voldivpin 21
+#define R1_OHM 3000.0F
+#define R2_OHM 1740.0F
 
 #define xbeeGS Serial3
 #define xbeeTP Serial4
@@ -75,6 +77,8 @@ int gpsSatellite = 0;
 String State = "PRELAUNCH";
 int StatePayload = 0;
 String cmdEcho = "N/A";
+float breakDegree = 180;
+long breakStartAt = -1;
 
 void recovery();
 void get_file();
@@ -108,22 +112,30 @@ void setup() {
     digitalWrite(BUZZER_PIN, HIGH);
     delay(1000);
     digitalWrite(BUZZER_PIN, LOW);
+    delay(500);
 
     setSyncProvider(getTeensy3Time);
 
     if (bme280.init())
         Serial.println("✔ SUCCEED: BME280");
-    else
+    else {
         Serial.println("[FAILED] Unable to set up BME280!");
-
-    if (SD.begin(10))
+        beep(1);
+    }
+    delay(500);
+    if (SD.begin(SD_CS_PIN))
         Serial.println("✔ SUCCEED: SD card reader");
     else {
         Serial.println("[FAILED] SD card reader initialization failed!");
         beep(5);
     }
-    // Serial.println("Install SD Card done");  // fix later
+
+    delay(1000);
     recovery();
+
+    servoBreak.write(0);
+    delay(3000);
+    servoBreak.write(180);
 
     // ! TESTING ONLY
     // state = 3;
@@ -163,6 +175,7 @@ void recovery() {
     Packet = a.toInt();
     state = b.toInt();
     get_file();
+    beep(3);
 }
 
 void doCommand(String cmd) {
@@ -181,6 +194,7 @@ void doCommand(String cmd) {
         EEPROM.write(recovPkg, 0);
         get_file();
     } else if (cmd == "CX,OFF") {
+        beep(1);
         Serial.println("CXOFF");
         cxON = false;
         cmdEcho = "CXOFF";
@@ -281,6 +295,13 @@ void get_battery() {
     // float detected_voltage = (map(analogRead(voldivpin), 0, 1023, 0, 3.3));
     float apparentVoltage = analogRead(voldivpin) * 3.3 / 1023.0;
     Voltage = apparentVoltage * ((R1_OHM + R2_OHM) / R2_OHM);
+    if (Voltage < 5.3) {
+        beep(5, 25);
+    }
+}
+
+double mapf(double x, double in_min, double in_max, double out_min, double out_max) {
+    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
 void inMission() {
@@ -289,7 +310,6 @@ void inMission() {
         //        Serial.println("inMission");
         get_time();
         get_gps();
-        get_battery();
         if (SIM) {
             get_BME_simulation();
         } else {
@@ -341,12 +361,12 @@ void inMission() {
                 }
                 break;
             case 5:
-                while (true) {
-                    digitalWrite(BUZZER_PIN, HIGH);
-                    delay(500);
-                    digitalWrite(BUZZER_PIN, LOW);
-                    delay(500);
-                }
+                // while (true) {
+                digitalWrite(BUZZER_PIN, HIGH);
+                delay(500);
+                digitalWrite(BUZZER_PIN, LOW);
+                delay(500);
+                // }
                 break;
         }
         telemetry = teamId + "," + missionTime + "," + String(Packet) + ",C," + Mode + "," + String(P) + "," + String(Altitude, 2) + "," + String(Temp, 2) + "," + String(Voltage) + "," + String(gpsTime) + "," + String(Latitude, 6) + "," + String(Longitude, 6) + "," + String(gpsAltitude) + "," + String(gpsSatellite) + "," + State + "," + cmdEcho + "\r";
@@ -357,8 +377,7 @@ void inMission() {
         }
         Serial.println(telemetry);
         xbeeGS.print(telemetry);
-        EEPROM.put(recovPkg, Packet);
-        EEPROM.put(recovState, state);
+        EEPROM.update(recovPkg, Packet);
         Packet++;
         time0 = time1;
     }
@@ -366,25 +385,27 @@ void inMission() {
 
 void emergency(String cmd) {
     if (cmd == "FORCE,PARADEPLOY") {
+        servoParachute.write(26);
+        delay(173);
         servoParachute.write(90);
-        // delay(1000);
-        servoParachute.write(0);
     } else if (cmd == "FORCE,SEQUENCE") {
-        // Waiting for Toon's break system code
-        servoParachute.write(90);
-        delay(1000);
+        breakStartAt = millis();
+    } else if (cmd == "FORCE,HALT") {
+        breakStartAt = -1;
     } else if (cmd == "FORCE,RELEASE") {
-        servoBreak.write(0);
+        breakDegree = 0;
     } else if (cmd == "FORCE,BREAK") {
-        servoBreak.write(180);
+        breakDegree = 180;
     } else if (cmd == "FORCE,RESETCAM") {
         xbeeTP.print("CMD,1022,FORCE,RESETCAM\r");
     } else if (cmd == "FORCE,CALCAM") {
         xbeeTP.print("CMD,1022,FORCE,CALCAM\r");
     } else if (cmd == "FORCE,POLL") {
         Serial.println("Pinging payload");
-        xbeeTP.print("CMD,1022,TP,POLL\r\r\r");
-    } else if (cmd == "FORCE,STATE1")
+        xbeeTP.print("POLL\r\r\r");
+    } else if (cmd == "FORCE,STATE0")
+        state = 0;
+    else if (cmd == "FORCE,STATE1")
         state = 1;
     else if (cmd == "FORCE,STATE2")
         state = 2;
@@ -396,28 +417,52 @@ void emergency(String cmd) {
         state = 5;
 }
 
+bool reachTerminator = false;
 void loop() {
     // if (xbeeTP.available()) {
     //     Serial.print(xbeeTP.readString(5));
     // }
     if (xbeeTP.available()) {
-        while (xbeeTP.available()) {
-            char inchar = xbeeTP.read();
-            tp += inchar;
-            if (inchar == '\r' || inchar == '\n') {
-                xbeeGS.print(tp);
-                Serial.println(tp);
-                tp = "";
-            }
-        }
+        // while (xbeeTP.available()) {
+        //     char inchar = xbeeTP.read();
+        //     tp += inchar;
+        //     Serial.print(inchar);
+        //     if (inchar == '\r') {
+        //         xbeeGS.print(tp);
+        //         Serial.println(tp);
+        //         tp = "";
+        //     }
+        // }
+
+        // while (xbeeTP.available()) {
+        //     char inchar = xbeeTP.read();
+        //     if (reachTerminator && inchar != '$') {
+        //         xbeeGS.print(tp);
+        //         Serial.println(tp);
+        //         Serial.println("DONE");
+        //         tp = "";
+        //         tp += inchar;
+        //         reachTerminator = false;
+        //         continue;
+        //     }
+        //     if (inchar == '$') {
+        //         inchar = '\r';
+        //         reachTerminator = true;
+        //     }
+        //     tp += inchar;
+        // }
+
+        String in = xbeeTP.readStringUntil('$');
+        xbeeGS.print(in + '\r');
+        Serial.println(in);
     }
     poll_time1 = millis() + 125;
     while (Serial2.available())
         gps.encode(Serial2.read());
     if (state >= 3 && poll_time1 - poll_time0 >= 250) {
         poll_time0 = poll_time1;
-        Serial.println("Pinging payload");
-        xbeeTP.print("CMD,1022,TP,POLL\r\r\r");
+        // Serial.println("Pinging payload");
+        xbeeTP.print("POLL\r\r\r");
     }
     if (Serial.available()) {
         for (int i = 0; i < 1; i++) {  // debug only
@@ -428,7 +473,7 @@ void loop() {
         }
         while (Serial.available()) {
             char inchar = Serial.read();
-            if (inchar == '$' || inchar == '\r' || inchar == '\n') {
+            if (inchar == '\n') {
                 cmd = cmd.trim();
                 cmd = (cmd.substring(9));
                 Serial.println("GS:" + cmd);
@@ -440,12 +485,7 @@ void loop() {
         }
     }
     if (xbeeGS.available()) {
-        for (int i = 0; i < 1; i++) {  // debug only
-            digitalWrite(BUZZER_PIN, HIGH);
-            delay(50);
-            digitalWrite(BUZZER_PIN, LOW);
-            delay(50);
-        }
+        beep(1);
         while (xbeeGS.available()) {
             String cmd = xbeeGS.readStringUntil('\r');
             if (cmd == "\r") return;
@@ -456,6 +496,35 @@ void loop() {
             cmd = "";
         }
     }
+
+    if (breakStartAt != -1) {
+        float t = (millis() - breakStartAt) / 1000.0;
+        if (t <= 0)
+            breakDegree = 180;
+        else if (t <= 0.1)
+            breakDegree = mapf(t, 0, 0.1, 180, 0);
+        else if (t <= 0.6)
+            breakDegree = 0;
+        else if (t <= 0.9)
+            breakDegree = mapf(t, 0.6, 0.9, 0, 180);
+        else if (t <= 1.9)
+            breakDegree = 180;
+        else if (t <= 11.4) {
+            float t_loop = (int((t - 1.9) * 100) % 190) / 100.0;
+            if (t_loop <= 1)
+                breakDegree = 180;
+            else if (t_loop <= 1.1)
+                breakDegree = mapf(t_loop, 1, 1.1, 180, 0);
+            else if (t_loop <= 1.6)
+                breakDegree = 0;
+            else if (t_loop <= 1.9)
+                breakDegree = mapf(t_loop, 1.6, 1.9, 0, 180);
+        } else {
+            breakStartAt = -1;
+        }
+    }
+
+    servoBreak.write(breakDegree);
     // if (xbeeTP.available()) {
     // String tp = xbeeTP.readStringUntil('\r');
     // if (tp == "\r") return;
@@ -478,8 +547,11 @@ void loop() {
     // }
     // tp = "";
     // }
-    delay(10);
+
+    // delay(10);
+    get_battery();
     if (cxON) {
         inMission();
     }
+    EEPROM.update(recovState, state);
 }
