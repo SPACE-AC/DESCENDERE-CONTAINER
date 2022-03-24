@@ -67,6 +67,7 @@ int Packet = 0;
 char Mode = 'F';
 char P = 'N';
 float Altitude = 0;
+float Apogee = 0;
 float Temp = 0;
 float Voltage = 0;
 char gpsTime[32] = "xx:xx:xx";
@@ -329,9 +330,16 @@ void inMission() {
                 }
                 break;
             case 2:
+                State = "APOGEE";
+                Altitude = Apogee
+                if (Altitude - Apogee >= 30 && Altitude > 670) {
+                    state = 3;
+                }
+                break;
+            case 3:
                 State = "PARADEPLOY";
                 if (Altitude <= 410 && Altitude > 390) {
-                    state = 3;
+                    state = 4;
                     P = 'R';
                     xbeeGS.print("CMD,1022,SECOND PARACHUTE,ON\r");
 
@@ -341,10 +349,10 @@ void inMission() {
                     servoParachute.write(90);
                 }
                 break;
-            case 3:
+            case 4:
                 State = "TPDEPLOY";
                 if (Altitude <= 310 && Altitude > 290) {
-                    state = 4;
+                    state = 5;
                     P = 'R';
                     Serial5.print("CMD,1022,PAYLOAD,ON\r");
                     servoParachute.write(90);
@@ -352,15 +360,15 @@ void inMission() {
                     // servo2.write(0);
                 }
                 break;
-            case 4:
+            case 5:
                 State = "RELEASED";
                 servoBreak.write(180);
                 if (Altitude <= 5 && Altitude >= -5) {
-                    state = 5;
+                    state = 6;
                     State = "LAND";
                 }
                 break;
-            case 5:
+            case 6:
                 // while (true) {
                 digitalWrite(BUZZER_PIN, HIGH);
                 delay(500);
