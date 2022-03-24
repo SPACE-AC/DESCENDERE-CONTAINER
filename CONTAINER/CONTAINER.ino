@@ -423,6 +423,8 @@ void emergency(String cmd) {
         state = 4;
     else if (cmd == "FORCE,STATE5")
         state = 5;
+    else if (cmd == "FORCE,STATE6")
+        state = 6;
 }
 
 bool reachTerminator = false;
