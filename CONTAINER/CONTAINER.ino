@@ -509,7 +509,7 @@ void loop() {
             breakDegree = mapf(t, 0.6, 0.9, 0, 180);
         else if (t <= 1.9)
             breakDegree = 180;
-        else if (t <= 11.4) {
+        else if (t <= 20.9) {
             float t_loop = (int((t - 1.9) * 100) % 190) / 100.0;
             if (t_loop <= 1)
                 breakDegree = 180;
