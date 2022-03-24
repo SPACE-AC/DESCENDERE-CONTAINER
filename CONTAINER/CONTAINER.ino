@@ -52,7 +52,7 @@ const int recovState = 10;
 const int recovMode = 20;
 const int recovAlt = 30;
 
-float Peak = -2147483648;
+float Apogee = -2147483648;
 int refAltitude = 0;
 int state = 0;
 int simPressure = 0;
@@ -67,7 +67,6 @@ int Packet = 0;
 char Mode = 'F';
 char P = 'N';
 float Altitude = 0;
-float Apogee = 0;
 float Temp = 0;
 float Voltage = 0;
 char gpsTime[32] = "xx:xx:xx";
@@ -273,8 +272,8 @@ void get_BME_flight() {
     Temp = bme280.getTemperature();
     float a = bme280.calcAltitude(bme280.getPressure());
     Altitude = float(a - refAltitude);
-    if (Altitude >= Peak) {
-        Peak = Altitude;
+    if (Altitude >= Apogee) {
+        Apogee = Altitude;
     }
 }
 
@@ -282,8 +281,8 @@ void get_BME_simulation() {
     Temp = bme280.getTemperature();
     float a = bme280.calcAltitude(simPressure);
     Altitude = float(a - refAltitude);
-    if (Altitude >= Peak) {
-        Peak = Altitude;
+    if (Altitude >= Apogee) {
+        Apogee = Altitude;
     }
 }
 
@@ -325,22 +324,14 @@ void inMission() {
                 break;
             case 1:
                 State = "LAUNCH";
-                if (Peak - Altitude >= 30 && Altitude > 600) {
+                if (Apogee - Altitude >= 30 && Altitude >= 670) {
                     state = 2;
                 }
                 break;
             case 2:
                 State = "APOGEE";
-                Altitude = Apogee
-                if (Altitude - Apogee >= 30 && Altitude > 670) {
-                    state = 3;
-                }
-                break;
-            case 3:
-                State = "PARADEPLOY";
                 if (Altitude <= 410 && Altitude > 390) {
-                    state = 4;
-                    P = 'R';
+                    state = 3;
                     xbeeGS.print("CMD,1022,SECOND PARACHUTE,ON\r");
 
                     // rotate 90 degrees on continuous servo using delay
@@ -349,32 +340,28 @@ void inMission() {
                     servoParachute.write(90);
                 }
                 break;
+            case 3:
+                State = "PARADEPLOY";
+                if (Altitude <= 310 && Altitude > 290) {
+                    state = 4;
+                    P = 'R';
+                    breakStartAt = millis();
+                    xbeeTP.print("ON");
+                }
+                break;
             case 4:
                 State = "TPDEPLOY";
-                if (Altitude <= 310 && Altitude > 290) {
+                if (Altitude <= 5 && Altitude >= -5) {
                     state = 5;
-                    P = 'R';
-                    Serial5.print("CMD,1022,PAYLOAD,ON\r");
-                    servoParachute.write(90);
-                    // delay(1000);
-                    // servo2.write(0);
+                    cxON = false;
                 }
                 break;
             case 5:
-                State = "RELEASED";
-                servoBreak.write(180);
-                if (Altitude <= 5 && Altitude >= -5) {
-                    state = 6;
-                    State = "LAND";
-                }
-                break;
-            case 6:
-                // while (true) {
+                State = "LAND";
                 digitalWrite(BUZZER_PIN, HIGH);
                 delay(500);
                 digitalWrite(BUZZER_PIN, LOW);
                 delay(500);
-                // }
                 break;
         }
         telemetry = teamId + "," + missionTime + "," + String(Packet) + ",C," + Mode + "," + String(P) + "," + String(Altitude, 2) + "," + String(Temp, 2) + "," + String(Voltage) + "," + String(gpsTime) + "," + String(Latitude, 6) + "," + String(Longitude, 6) + "," + String(gpsAltitude) + "," + String(gpsSatellite) + "," + State + "," + cmdEcho + "\r";
@@ -423,8 +410,6 @@ void emergency(String cmd) {
         state = 4;
     else if (cmd == "FORCE,STATE5")
         state = 5;
-    else if (cmd == "FORCE,STATE6")
-        state = 6;
 }
 
 bool reachTerminator = false;
