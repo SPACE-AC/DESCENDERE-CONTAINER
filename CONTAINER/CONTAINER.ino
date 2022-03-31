@@ -77,8 +77,12 @@ int gpsSatellite = 0;
 String State = "PRELAUNCH";
 int StatePayload = 0;
 String cmdEcho = "N/A";
+
 float breakDegree = 180;
 long breakStartAt = -1;
+short breakMode = 1;
+
+bool forcePolling = false;
 
 void recovery();
 void get_file();
@@ -198,6 +202,7 @@ void doCommand(String cmd) {
         Serial.println("CXOFF");
         cxON = false;
         cmdEcho = "CXOFF";
+        forcePolling = false;
         Mode = 'F';
         for (int i = 0; i < EEPROM.length(); i++) {
             EEPROM.write(i, 0);
@@ -346,7 +351,7 @@ void inMission() {
                     state = 4;
                     P = 'R';
                     breakStartAt = millis();
-                    xbeeTP.print("ON");
+                    xbeeTP.print("ON\r\r\r");
                 }
                 break;
             case 4:
@@ -354,6 +359,7 @@ void inMission() {
                 if (Altitude <= 5 && Altitude >= -5) {
                     state = 5;
                     cxON = false;
+                    xbeeTP.print("OFF\r\r\r");
                 }
                 break;
             case 5:
@@ -378,27 +384,46 @@ void inMission() {
     }
 }
 
+bool reachTerminator = false;
 void emergency(String cmd) {
     if (cmd == "FORCE,PARADEPLOY") {
         servoParachute.write(26);
         delay(173);
         servoParachute.write(90);
-    } else if (cmd == "FORCE,SEQUENCE") {
+    } else if (cmd == "FORCE,SEQUENCE")
         breakStartAt = millis();
-    } else if (cmd == "FORCE,HALT") {
+    else if (cmd == "FORCE,HALT")
         breakStartAt = -1;
-    } else if (cmd == "FORCE,RELEASE") {
+    else if (cmd == "FORCE,RELEASE")
         breakDegree = 0;
-    } else if (cmd == "FORCE,BREAK") {
+    else if (cmd == "FORCE,BREAK")
         breakDegree = 180;
-    } else if (cmd == "FORCE,RESETCAM") {
+    else if (cmd == "FORCE,MODE1")
+        breakMode = 1;
+    else if (cmd == "FORCE,MODE2")
+        breakMode = 2;
+    else if (cmd == "FORCE,RESETCAM")
         xbeeTP.print("CMD,1022,FORCE,RESETCAM\r");
-    } else if (cmd == "FORCE,CALCAM") {
+    else if (cmd == "FORCE,CALCAM")
         xbeeTP.print("CMD,1022,FORCE,CALCAM\r");
-    } else if (cmd == "FORCE,POLL") {
+    else if (cmd == "FORCE,POLL") {
         Serial.println("Pinging payload");
         xbeeTP.print("POLL\r\r\r");
-    } else if (cmd == "FORCE,STATE0")
+    } else if (cmd == "FORCE,POLLON")
+        forcePolling = true;
+    else if (cmd == "FORCE,POLLOFF")
+        forcePolling = false;
+    else if (cmd == "FORCE,TPON")
+        for (int i = 0; i < 5; i++) {
+            xbeeTP.print("ON\r\r\r");
+            delay(10);
+        }
+    else if (cmd == "FORCE,TPOFF")
+        for (int i = 0; i < 5; i++) {
+            xbeeTP.print("OFF\r\r\r");
+            delay(10);
+        }
+    else if (cmd == "FORCE,STATE0")
         state = 0;
     else if (cmd == "FORCE,STATE1")
         state = 1;
@@ -410,9 +435,10 @@ void emergency(String cmd) {
         state = 4;
     else if (cmd == "FORCE,STATE5")
         state = 5;
+
+    cmdEcho = cmd.substring(cmd.indexOf(",") + 1);
 }
 
-bool reachTerminator = false;
 void loop() {
     // if (xbeeTP.available()) {
     //     Serial.print(xbeeTP.readString(5));
@@ -454,7 +480,7 @@ void loop() {
     poll_time1 = millis() + 125;
     while (Serial2.available())
         gps.encode(Serial2.read());
-    if (state >= 3 && poll_time1 - poll_time0 >= 250) {
+    if ((state == 4 || forcePolling) && poll_time1 - poll_time0 >= 250) {
         poll_time0 = poll_time1;
         // Serial.println("Pinging payload");
         xbeeTP.print("POLL\r\r\r");
@@ -492,29 +518,36 @@ void loop() {
         }
     }
 
-    if (breakStartAt != -1) {
+    if (breakStartAt != -1 && breakMode == 1) {
         float t = (millis() - breakStartAt) / 1000.0;
-        if (t <= 0)
-            breakDegree = 180;
-        else if (t <= 0.1)
-            breakDegree = mapf(t, 0, 0.1, 180, 0);
-        else if (t <= 0.6)
-            breakDegree = 0;
-        else if (t <= 0.9)
-            breakDegree = mapf(t, 0.6, 0.9, 0, 180);
-        else if (t <= 1.9)
-            breakDegree = 180;
-        else if (t <= 20.9) {
-            float t_loop = (int((t - 1.9) * 100) % 190) / 100.0;
-            if (t_loop <= 1)
-                breakDegree = 180;
-            else if (t_loop <= 1.1)
-                breakDegree = mapf(t_loop, 1, 1.1, 180, 0);
-            else if (t_loop <= 1.6)
+        if (t <= 11.2) {
+            float t_loop = (int(t * 100) % 140) / 100.0;
+            if (t_loop <= 0.1)
+                breakDegree = mapf(t_loop, 0, 0.1, 180, 0);
+            else if (t_loop <= 0.6)
                 breakDegree = 0;
-            else if (t_loop <= 1.9)
-                breakDegree = mapf(t_loop, 1.6, 1.9, 0, 180);
-        } else {
+            else if (t_loop <= 0.9)
+                breakDegree = mapf(t_loop, 0.6, 0.9, 0, 180);
+            else if (t_loop <= 1.4)
+                breakDegree = 180;
+        } else if (t >= 12.2) {
+            breakDegree = 0;
+            breakStartAt = -1;
+        }
+    } else if (breakStartAt != -1 && breakMode == 2) {
+        float t = (millis() - breakStartAt) / 1000.0;
+        if (t <= 11.6) {
+            float t_loop = (int(t * 100) % 145) / 100.0;
+            if (t_loop <= 0.1)
+                breakDegree = mapf(t_loop, 0, 0.1, 180, 0);
+            else if (t_loop <= 0.65)
+                breakDegree = 0;
+            else if (t_loop <= 0.95)
+                breakDegree = mapf(t_loop, 0.65, 0.95, 0, 180);
+            else if (t_loop <= 1.45)
+                breakDegree = 180;
+        } else if (t >= 12.6) {
+            breakDegree = 0;
             breakStartAt = -1;
         }
     }
