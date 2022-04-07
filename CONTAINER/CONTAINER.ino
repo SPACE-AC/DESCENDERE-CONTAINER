@@ -8,9 +8,8 @@
 
 // CONFIG - START
 
-#define LED1_PIN 4
-#define LED2_PIN 5
 #define BUZZER_PIN 3
+#define CAMERA_PIN 6
 
 #define SERVO_PARA_PIN 4
 #define SERVO_BREAK_PIN 5
@@ -32,9 +31,6 @@ time_t RTCTime;
 Servo servoParachute;
 Servo servoBreak;
 
-unsigned long time1 = 0;
-unsigned long time0 = 0;
-
 unsigned long poll_time1 = 0;
 unsigned long poll_time0 = 0;
 
@@ -51,8 +47,10 @@ const int recovPkg = 0;
 const int recovState = 10;
 const int recovMode = 20;
 const int recovAlt = 30;
+const int recovEApogee = 40;
 
-float Apogee = -2147483648;
+float apogee = -2147483648;
+float expected_apogee = -2147483648;
 int refAltitude = 0;
 int state = 0;
 int simPressure = 0;
@@ -63,18 +61,18 @@ String cmd = "";
 
 String teamId = "1022";
 char missionTime[32] = "xx:xx:xx";
-int Packet = 0;
+int packetCount = 0;
 char Mode = 'F';
 char P = 'N';
-float Altitude = 0;
-float Temp = 0;
+float altitude = 0;
+float temp = 0;
 float Voltage = 0;
 char gpsTime[32] = "xx:xx:xx";
 double Latitude = 0;
 double Longitude = 0;
 float gpsAltitude = 0;
 int gpsSatellite = 0;
-String State = "PRELAUNCH";
+String state_str = "PRELAUNCH";
 int StatePayload = 0;
 String cmdEcho = "N/A";
 
@@ -97,6 +95,12 @@ void beep(const unsigned int& count, const unsigned int& delay_ms = 100) {
     }
 }
 
+void toggleCamera() {
+    digitalWrite(CAMERA_PIN, LOW);
+    delay(550);
+    digitalWrite(CAMERA_PIN, HIGH);
+}
+
 void setup() {
     Serial.begin(9600);
     Serial.println("Initiating ...");
@@ -106,12 +110,12 @@ void setup() {
 
     servoParachute.attach(SERVO_PARA_PIN);  // set port
     servoBreak.attach(SERVO_BREAK_PIN);     // set port
-    pinMode(LED1_PIN, OUTPUT);
-    pinMode(LED2_PIN, OUTPUT);
     pinMode(BUZZER_PIN, OUTPUT);
     pinMode(voldivpin, INPUT);
     pinMode(13, OUTPUT);
+    pinMode(CAMERA_PIN, OUTPUT);
     digitalWrite(13, HIGH);
+    digitalWrite(CAMERA_PIN, HIGH);
 
     digitalWrite(BUZZER_PIN, HIGH);
     delay(1000);
@@ -150,6 +154,8 @@ void recovery() {
     String b = EEPROM.read(recovState);
     String c = EEPROM.read(recovMode);
     String d = EEPROM.read(recovAlt);
+    String rea = EEPROM.read(recovEApogee);
+    expected_apogee = rea.toFloat();
     int e = c.toInt();
 
     switch (e) {
@@ -176,7 +182,7 @@ void recovery() {
     } else {
         refAltitude = round(float(bme280.calcAltitude(bme280.getPressure())));
     }
-    Packet = a.toInt();
+    packetCount = a.toInt();
     state = b.toInt();
     get_file();
     beep(3);
@@ -188,7 +194,7 @@ void doCommand(String cmd) {
         Serial.println("CXON");
         cxON = true;
         refAltitude = round(float(bme280.calcAltitude(bme280.getPressure())));
-        Packet = 0;
+        packetCount = 0;
         cmdEcho = "CXON";
         state = 0;
         Mode = 'F';
@@ -196,6 +202,7 @@ void doCommand(String cmd) {
         EEPROM.write(recovAlt, refAltitude);
         EEPROM.write(recovState, state);
         EEPROM.write(recovPkg, 0);
+        servoParachute.write(105);
         get_file();
     } else if (cmd == "CX,OFF") {
         beep(1);
@@ -207,7 +214,7 @@ void doCommand(String cmd) {
         for (int i = 0; i < EEPROM.length(); i++) {
             EEPROM.write(i, 0);
         }
-        servoParachute.write(90);
+        // servoParachute.write(90);
         servoBreak.write(90);
         Serial.println("CXOFF");
         state = 0;
@@ -274,20 +281,21 @@ void get_gps() {
 }
 
 void get_BME_flight() {
-    Temp = bme280.getTemperature();
-    float a = bme280.calcAltitude(bme280.getPressure());
-    Altitude = float(a - refAltitude);
-    if (Altitude >= Apogee) {
-        Apogee = Altitude;
+    temp = bme280.getTemperature();
+    float absoluteAlt = bme280.calcAltitude(bme280.getPressure());
+    altitude = float(absoluteAlt - refAltitude);
+    if (altitude >= apogee) {
+        apogee = altitude;
     }
 }
 
 void get_BME_simulation() {
-    Temp = bme280.getTemperature();
+    temp = bme280.getTemperature();
     float a = bme280.calcAltitude(simPressure);
-    Altitude = float(a - refAltitude);
-    if (Altitude >= Apogee) {
-        Apogee = Altitude;
+    altitude = float(a - refAltitude);
+    if (altitude < -500 || altitude > 800) return;
+    if (altitude >= apogee) {
+        apogee = altitude;
     }
 }
 
@@ -309,45 +317,47 @@ double mapf(double x, double in_min, double in_max, double out_min, double out_m
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
+uint32_t lastExecutedSend = 0, lastExecutedState = 0;
 void inMission() {
-    time1 = millis();
-    if (time1 - time0 >= 990) {
-        //        Serial.println("inMission");
-        get_time();
-        get_gps();
+    if (millis() - lastExecutedState > 100) {
+        lastExecutedState = millis();
         if (SIM) {
             get_BME_simulation();
         } else {
             get_BME_flight();
         }
+        if (altitude < -500 || altitude > 800) return;
         switch (state) {
             case 0:
-                State = "PRELAUNCH";
-                if (Altitude >= 10) {
+                state_str = "PRELAUNCH";
+                if (altitude >= 10) {
                     state = 1;
                 }
                 break;
             case 1:
-                State = "LAUNCH";
-                if (Apogee - Altitude >= 30 && Altitude >= 670) {
+                state_str = "LAUNCH";
+                if (altitude >= expected_apogee) {  // actual: apogee - altitude >= 30 && altitude >= 670
                     state = 2;
                 }
                 break;
             case 2:
-                State = "APOGEE";
-                if (Altitude <= 410 && Altitude > 390) {
+                state_str = "APOGEE";
+                int paradeployAlt = apogee - 10;
+                if (altitude <= paradeployAlt + 2) {  // actual: altitude <= 410 && altitude > 390
                     state = 3;
                     xbeeGS.print("CMD,1022,SECOND PARACHUTE,ON\r");
 
                     // rotate 90 degrees on continuous servo using delay
-                    servoParachute.write(26);
-                    delay(173);
-                    servoParachute.write(90);
+                    // servoParachute.write(26);
+                    // // delay(173);
+                    // delay(173);
+                    // servoParachute.write(90);
+                    servoParachute.write(15);
                 }
                 break;
             case 3:
-                State = "PARADEPLOY";
-                if (Altitude <= 310 && Altitude > 290) {
+                state_str = "PARADEPLOY";
+                if (altitude <= 310 && altitude > 290) {  // actual: altitude <= 310 && altitude > 290
                     state = 4;
                     P = 'R';
                     breakStartAt = millis();
@@ -355,22 +365,28 @@ void inMission() {
                 }
                 break;
             case 4:
-                State = "TPDEPLOY";
-                if (Altitude <= 5 && Altitude >= -5) {
+                state_str = "TPDEPLOY";
+                if (altitude <= 5 && altitude >= -5) {
                     state = 5;
                     cxON = false;
                     xbeeTP.print("OFF\r\r\r");
                 }
                 break;
             case 5:
-                State = "LAND";
+                state_str = "LAND";
                 digitalWrite(BUZZER_PIN, HIGH);
                 delay(500);
                 digitalWrite(BUZZER_PIN, LOW);
                 delay(500);
                 break;
         }
-        telemetry = teamId + "," + missionTime + "," + String(Packet) + ",C," + Mode + "," + String(P) + "," + String(Altitude, 2) + "," + String(Temp, 2) + "," + String(Voltage) + "," + String(gpsTime) + "," + String(Latitude, 6) + "," + String(Longitude, 6) + "," + String(gpsAltitude) + "," + String(gpsSatellite) + "," + State + "," + cmdEcho + "\r";
+    }
+    if (millis() - lastExecutedSend >= 990) {
+        lastExecutedSend = millis();
+
+        get_time();
+        get_gps();
+        telemetry = teamId + "," + missionTime + "," + String(packetCount) + ",C," + Mode + "," + String(P) + "," + String(altitude, 2) + "," + String(temp, 2) + "," + String(Voltage) + "," + String(gpsTime) + "," + String(Latitude, 6) + "," + String(Longitude, 6) + "," + String(gpsAltitude) + "," + String(gpsSatellite) + "," + state_str + "," + cmdEcho + "," + expected_apogee + "\r";
         File file = SD.open(FileC, FILE_WRITE);
         if (file) {
             file.println(telemetry);
@@ -378,18 +394,18 @@ void inMission() {
         }
         Serial.println(telemetry);
         xbeeGS.print(telemetry);
-        EEPROM.update(recovPkg, Packet);
-        Packet++;
-        time0 = time1;
+        EEPROM.update(recovPkg, packetCount);
+        packetCount++;
     }
 }
 
 bool reachTerminator = false;
 void emergency(String cmd) {
     if (cmd == "FORCE,PARADEPLOY") {
-        servoParachute.write(26);
-        delay(173);
-        servoParachute.write(90);
+        // servoParachute.write(26);
+        // delay(173);
+        // servoParachute.write(90);
+        servoParachute.write(15);
     } else if (cmd == "FORCE,SEQUENCE")
         breakStartAt = millis();
     else if (cmd == "FORCE,HALT")
@@ -423,6 +439,8 @@ void emergency(String cmd) {
             xbeeTP.print("OFF\r\r\r");
             delay(10);
         }
+    else if (cmd == "FORCE,CCAM")
+        toggleCamera();
     else if (cmd == "FORCE,STATE0")
         state = 0;
     else if (cmd == "FORCE,STATE1")
@@ -435,6 +453,13 @@ void emergency(String cmd) {
         state = 4;
     else if (cmd == "FORCE,STATE5")
         state = 5;
+    else if (cmd.startsWith("SETPEAK")) {
+        const float newApogee = cmd.substring(8).toFloat();
+        if (newApogee > 0) {
+            expected_apogee = newApogee;
+            EEPROM.update(recovEApogee, expected_apogee);
+        }
+    }
 
     cmdEcho = cmd.substring(cmd.indexOf(",") + 1);
 }
